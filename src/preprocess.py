@@ -95,9 +95,55 @@ def upload_to_s3(filepath):
     s3.upload_file(filepath, BUCKET, "cleaned/papers.parquet")
     print("Upload complete!")
 
+def generate_metadata(df):
+    import json
+    print("Generating metadata...")
+    os.makedirs("outputs/data", exist_ok=True)
+
+    summary = {
+        "total_papers": int(len(df)),
+        "year_min": int(df["year"].min()),
+        "year_max": int(df["year"].max()),
+        "unique_venues": int(df["venue"].nunique()),
+        "missing_abstracts": int((df["abstract"] == "").sum()),
+        "missing_venue": int((df["venue"] == "").sum()),
+        "avg_citations": round(float(df["n_citation"].mean()), 2),
+        "avg_authors": round(float(df["author_count"].mean()), 2),
+        "avg_references": round(float(df["reference_count"].mean()), 2),
+        "total_citations": int(df["n_citation"].sum()),
+    }
+    with open("outputs/data/summary.json", "w") as f:
+        json.dump(summary, f, indent=2)
+    print("Saved summary.json")
+
+    sample = df[["id", "title", "authors", "venue", "year", "n_citation"]].head(100)
+    sample["authors"] = sample["authors"].apply(lambda x: ", ".join(x) if isinstance(x, list) else "")
+    sample.to_json("outputs/data/sample.json", orient="records", indent=2)
+    print("Saved sample.json")
+
+    s3 = boto3.client("s3")
+    s3.upload_file("outputs/data/summary.json", BUCKET, "outputs/data/summary.json")
+    s3.upload_file("outputs/data/sample.json", BUCKET, "outputs/data/sample.json")
+    print("Uploaded metadata to S3")
+
 if __name__ == "__main__":
+    s3 = boto3.client("s3")
+    try:
+        s3.head_object(Bucket=BUCKET, Key="cleaned/papers.parquet")
+        print("Cleaned data already exists in S3. Skipping preprocessing.")
+        
+        print("Downloading cleaned data to generate metadata...")
+        os.makedirs("cleaned", exist_ok=True)
+        print("Loading cleaned data for metadata generation...")
+        s3.download_file(BUCKET, "cleaned/papers.parquet", "cleaned/papers.parquet")
+        df = pd.read_parquet("cleaned/papers.parquet")
+        generate_metadata(df)
+        exit(0)
+    except Exception as e:
+        print(f"Starting preprocessing... ({e})")
+
     download_from_s3()
     output_path = process_files()
     upload_to_s3(output_path)
+    generate_metadata(pd.read_parquet(output_path))
     print("\nPreprocessing complete!")
-    
