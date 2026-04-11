@@ -122,8 +122,8 @@ def generate_metadata(df):
     print("Saved sample.json")
 
     s3 = boto3.client("s3")
-    s3.upload_file("outputs/data/summary.json", BUCKET, "outputs/data/summary.json")
-    s3.upload_file("outputs/data/sample.json", BUCKET, "outputs/data/sample.json")
+    s3.upload_file("outputs/data/summary.json", BUCKET, "outputs/summary.json")
+    s3.upload_file("outputs/data/sample.json", BUCKET, "outputs/sample.json")
     print("Uploaded metadata to S3")
 
 if __name__ == "__main__":
@@ -131,7 +131,7 @@ if __name__ == "__main__":
     try:
         s3.head_object(Bucket=BUCKET, Key="cleaned/papers.parquet")
         print("Cleaned data already exists in S3. Skipping preprocessing.")
-        
+
         print("Downloading cleaned data to generate metadata...")
         os.makedirs("cleaned", exist_ok=True)
         print("Loading cleaned data for metadata generation...")
