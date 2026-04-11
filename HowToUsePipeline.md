@@ -17,22 +17,20 @@ You never need to touch AWS, the workflow file, or the UI. Just write your scrip
 
 ---
 
-## Step-by-step guide
-
-### Step 1 — Write your script in `src/`
+### Step 1: Write your script in `src/`
 
 Create a new `.py` file in the `src/` folder. Name it after your task:
 
 | Task | Filename |
 |---|---|
-| Exploratory Data Analysis | `eda.py` |
-| Citation Network | `network.py` |
-| Clustering | `clustering.py` |
-| Temporal Classification | `classification.py` |
+| Exploratory Data Analysis | `EDA.py` |
+| Citation Network | `Network.py` |
+| Clustering | `Clustering.py` |
+| Temporal Classification | `TemporalClassification.py` |
 
 ---
 
-### Step 2 — Follow the script template
+### Step 2: Follow the script template
 
 Every script must follow this structure:
 
@@ -42,37 +40,39 @@ import matplotlib.pyplot as plt
 import boto3
 import os
 
-# ── 1. Load the cleaned dataset from S3 ──────────────────────────────────────
+#  1. Load the cleaned dataset from S3 
 s3 = boto3.client("s3")
 os.makedirs("cleaned", exist_ok=True)
 s3.download_file(
-    "data-science-citation-network",
-    "cleaned/papers.parquet",
-    "cleaned/papers.parquet"
+  "data-science-citation-network",
+  "cleaned/papers.parquet",
+  "cleaned/papers.parquet"
 )
 df = pd.read_parquet("cleaned/papers.parquet")
 
-# ── 2. Create your output folder ─────────────────────────────────────────────
+# 2. Create your output folder 
 # Use the folder that matches your task (only one):
 os.makedirs("outputs/figures/eda", exist_ok=True)
 os.makedirs("outputs/figures/network", exist_ok=True)
 os.makedirs("outputs/figures/clustering", exist_ok=True)
 os.makedirs("outputs/figures/classification", exist_ok=True)
 
-# ── 3. Do your analysis ──────────────────────────────────────────────────────
-# ... your code here ...
+# 3. Do your analysis 
 
-# ── 4. Save every figure like this ───────────────────────────────────────────
+# ... YOU CODE GOES HERE ...
+
+#  4. Save every figure like this 
 plt.savefig("outputs/figures/eda/figure_name.png", dpi=150, bbox_inches="tight")
 plt.close()  # always close after saving
 ```
 
 ---
 
-### Step 3 — Add your script to `FilesToRun.txt`
+### Step 3: Add your script to `FilesToRun.txt`
 
 Open `FilesToRun.txt` in the root of the repo and add a line for your script:
 
+FORMAT: <FILE_NAME> | <RESULTS_DESTINATION>
 ```
 eda.py | outputs/
 ```
@@ -89,47 +89,40 @@ network.py | outputs/
 clustering.py | outputs/
 classification.py | outputs/
 ```
-
-> Scripts run in the order they appear in this file. Preprocessing always stays first.
-
+**Make sure to delete file name/destination form FilesToRun.txt**
 ---
 
-### Step 4 — Push to main
-
-```bash
-git add .
-git commit -m "Add eda analysis script"
-git push
-```
+### Step 4: Push to main
+* Use what ever method to push
 
 GitHub Actions will pick it up automatically. You can watch it run under the **Actions** tab on GitHub.
 
 ---
 
-### Step 5 — Check your results
+### Step 5: Check your results
 
 Once the pipeline finishes (~10 minutes), check:
-- **GitHub repo** → `outputs/figures/your-task/` for the raw image files
-- **UI** → https://sal-gr.github.io/Data-Science-1 for the visual dashboard
+- **GitHub repo**: `outputs/figures/your-task/` for the raw image files
+- **UI**: https://sal-gr.github.io/Data-Science-1 for the visual dashboard
 
 ---
 
-## Rules
+## **Rules**
 
 ### Files and folders
-- Write all scripts in `src/` — nowhere else
-- Save all figures to `outputs/figures/your-task/` — the UI only reads from these folders
-- Save figures as `.png` — the UI displays png, jpg, and svg only
+- Write all scripts in `src/`
+- Save all figures to `outputs/figures/your-task/` the UI only reads from these folders
+- Save figures as `.png`, the UI displays png, jpg, and svg only
 - Never save files outside the `outputs/` folder
 
 ### Plotting
-- **Never use `plt.show()`** — it will cause the pipeline to hang indefinitely
+- **Never use `plt.show()`**, it will cause the pipeline to hang indefinitely
 - Always use `plt.savefig()` followed by `plt.close()`
 - Use `dpi=150` and `bbox_inches="tight"` for clean figures
 
 ### Data access
 - Always read the cleaned dataset from S3 using the template above
-- Never hardcode local file paths — the pipeline runner uses a fresh environment every time
+- Never hardcode local file paths, the pipeline runner uses a fresh environment every time
 - Never modify the raw or cleaned dataset
 
 ### Files you must never edit
@@ -144,22 +137,13 @@ Once the pipeline finishes (~10 minutes), check:
 ### FilesToRun.txt
 - Always add your script before pushing
 - Scripts not listed here will not run
-- Never remove someone else's script from the list
-- Keep `preprocess.py` as the first line always
+- remove script when finished
 
 ---
 
 ## Adding new dependencies
 
-If your script needs a library that isn't in `requirements.txt`, add it:
-
-```
-pip install your-library
-echo your-library >> requirements.txt
-git add requirements.txt
-git commit -m "Add your-library to requirements"
-git push
-```
+If your script needs a library that isn't in `requirements.txt`, add it
 
 ---
 
@@ -182,9 +166,3 @@ The cleaned dataset is a pandas DataFrame with these columns:
 | `text_combined` | string | Title + abstract concatenated |
 
 ---
-
-## Need help?
-
-- Check the **Actions** tab on GitHub to see pipeline logs and error messages
-- View results at https://sal-gr.github.io/Data-Science-1
-- Reach out in the group chat if you're stuck
