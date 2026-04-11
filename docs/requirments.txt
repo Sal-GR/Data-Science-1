@@ -1,0 +1,9 @@
+pandas
+pyarrow
+boto3
+scikit-learn
+seaborn
+matplotlib
+networkx
+lightgbm
+scipy
