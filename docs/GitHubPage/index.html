@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Citation Network Analysis</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #f5f4f0;
+    --surface: #ffffff;
+    --border: #e2e0d8;
+    --text: #1a1916;
+    --muted: #7a7870;
+    --accent: #1a1916;
+    --tag-eda: #d4e8c2;
+    --tag-network: #c2d8e8;
+    --tag-cluster: #e8d4c2;
+    --tag-class: #e2c2e8;
+    --tag-eda-text: #2d5a0e;
+    --tag-network-text: #0e3a5a;
+    --tag-cluster-text: #5a2e0e;
+    --tag-class-text: #4a0e5a;
+  }
+
+  body {
+    font-family: 'DM Sans', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    font-size: 15px;
+    line-height: 1.6;
+  }
+
+  header {
+    border-bottom: 1px solid var(--border);
+    padding: 32px 48px;
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    background: var(--surface);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+
+  .header-left h1 {
+    font-size: 20px;
+    font-weight: 500;
+    letter-spacing: -0.02em;
+  }
+
+  .header-left p {
+    font-size: 13px;
+    color: var(--muted);
+    margin-top: 2px;
+    font-family: 'DM Mono', monospace;
+  }
+
+  .last-updated {
+    font-size: 12px;
+    color: var(--muted);
+    font-family: 'DM Mono', monospace;
+    text-align: right;
+  }
+
+  .last-updated span {
+    display: block;
+    color: var(--text);
+    font-size: 13px;
+    margin-top: 2px;
+  }
+
+  nav {
+    display: flex;
+    gap: 4px;
+    padding: 16px 48px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg);
+    position: sticky;
+    top: 89px;
+    z-index: 99;
+    overflow-x: auto;
+  }
+
+  nav a {
+    text-decoration: none;
+    font-size: 13px;
+    padding: 6px 14px;
+    border-radius: 20px;
+    color: var(--muted);
+    transition: all 0.15s;
+    white-space: nowrap;
+    font-weight: 400;
+    border: 1px solid transparent;
+  }
+
+  nav a:hover { color: var(--text); border-color: var(--border); background: var(--surface); }
+  nav a.active { color: var(--text); background: var(--surface); border-color: var(--border); font-weight: 500; }
+
+  main { padding: 40px 48px; max-width: 1200px; margin: 0 auto; }
+
+  .section { margin-bottom: 64px; scroll-margin-top: 160px; }
+
+  .section-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 24px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .section-tag {
+    font-size: 11px;
+    font-family: 'DM Mono', monospace;
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  .tag-eda { background: var(--tag-eda); color: var(--tag-eda-text); }
+  .tag-network { background: var(--tag-network); color: var(--tag-network-text); }
+  .tag-cluster { background: var(--tag-cluster); color: var(--tag-cluster-text); }
+  .tag-class { background: var(--tag-class); color: var(--tag-class-text); }
+
+  .section-title { font-size: 18px; font-weight: 500; letter-spacing: -0.02em; }
+  .section-desc { font-size: 13px; color: var(--muted); margin-left: auto; }
+
+  .figures-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+    gap: 16px;
+  }
+
+  .figure-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    transition: border-color 0.15s;
+  }
+
+  .figure-card:hover { border-color: #c0beb6; }
+
+  .figure-img {
+    width: 100%;
+    aspect-ratio: 4/3;
+    object-fit: contain;
+    background: var(--bg);
+    display: block;
+    padding: 16px;
+  }
+
+  .figure-label {
+    padding: 12px 16px;
+    border-top: 1px solid var(--border);
+    font-size: 12px;
+    color: var(--muted);
+    font-family: 'DM Mono', monospace;
+  }
+
+  .empty-state {
+    background: var(--surface);
+    border: 1px dashed var(--border);
+    border-radius: 8px;
+    padding: 48px 32px;
+    text-align: center;
+    grid-column: 1 / -1;
+  }
+
+  .empty-state .empty-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto 12px;
+    font-size: 18px;
+  }
+
+  .empty-state p {
+    font-size: 14px;
+    color: var(--muted);
+    margin-bottom: 6px;
+  }
+
+  .empty-state code {
+    font-family: 'DM Mono', monospace;
+    font-size: 12px;
+    background: var(--bg);
+    padding: 2px 8px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    color: var(--text);
+  }
+
+  .results-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 12px;
+  }
+
+  .result-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px;
+  }
+
+  .result-card .result-label {
+    font-size: 11px;
+    font-family: 'DM Mono', monospace;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 6px;
+  }
+
+  .result-card .result-value {
+    font-size: 28px;
+    font-weight: 300;
+    letter-spacing: -0.03em;
+  }
+
+  .pipeline-status {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px 20px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 32px;
+    font-size: 13px;
+  }
+
+  .status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #4caf50;
+    flex-shrink: 0;
+  }
+
+  .status-dot.pending { background: #ff9800; }
+
+  footer {
+    border-top: 1px solid var(--border);
+    padding: 24px 48px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 12px;
+    color: var(--muted);
+    font-family: 'DM Mono', monospace;
+  }
+
+  @media (max-width: 768px) {
+    header, nav, main, footer { padding-left: 20px; padding-right: 20px; }
+    nav { top: 73px; }
+    .figures-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="header-left">
+    <h1>Citation Network Analysis</h1>
+    <p>DBLP dataset &mdash; ~4M records</p>
+  </div>
+  <div class="last-updated">
+    last pipeline run
+    <span id="last-run">—</span>
+  </div>
+</header>
+
+<nav id="nav">
+  <a href="#eda" class="active">EDA</a>
+  <a href="#network">Citation Network</a>
+  <a href="#clustering">Clustering</a>
+  <a href="#classification">Classification</a>
+</nav>
+
+<main>
+
+  <div class="pipeline-status">
+    <div class="status-dot" id="status-dot"></div>
+    <span id="status-text">Loading pipeline status...</span>
+  </div>
+
+  <!-- EDA -->
+  <section class="section" id="eda">
+    <div class="section-header">
+      <span class="section-tag tag-eda">EDA</span>
+      <h2 class="section-title">Exploratory Data Analysis</h2>
+      <span class="section-desc">Citation distributions, publication trends, venue breakdowns</span>
+    </div>
+    <div class="figures-grid" id="eda-figures">
+      <div class="empty-state">
+        <div class="empty-icon">◎</div>
+        <p>No figures yet</p>
+        <p>Add <code>eda.py</code> to <code>FilesToRun.txt</code> and push to generate results</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Citation Network -->
+  <section class="section" id="network">
+    <div class="section-header">
+      <span class="section-tag tag-network">Network</span>
+      <h2 class="section-title">Citation Network</h2>
+      <span class="section-desc">PageRank scores, influential papers, network visualization</span>
+    </div>
+    <div class="figures-grid" id="network-figures">
+      <div class="empty-state">
+        <div class="empty-icon">◎</div>
+        <p>No figures yet</p>
+        <p>Add <code>network.py</code> to <code>FilesToRun.txt</code> and push to generate results</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Clustering -->
+  <section class="section" id="clustering">
+    <div class="section-header">
+      <span class="section-tag tag-cluster">Clustering</span>
+      <h2 class="section-title">Clustering</h2>
+      <span class="section-desc">TF-IDF + K-Means research area groups, PCA visualizations</span>
+    </div>
+    <div class="figures-grid" id="cluster-figures">
+      <div class="empty-state">
+        <div class="empty-icon">◎</div>
+        <p>No figures yet</p>
+        <p>Add <code>clustering.py</code> to <code>FilesToRun.txt</code> and push to generate results</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Classification -->
+  <section class="section" id="classification">
+    <div class="section-header">
+      <span class="section-tag tag-class">Classification</span>
+      <h2 class="section-title">Temporal Classification</h2>
+      <span class="section-desc">Model comparison, top predictive features, accuracy over time</span>
+    </div>
+    <div class="figures-grid" id="class-figures">
+      <div class="empty-state">
+        <div class="empty-icon">◎</div>
+        <p>No figures yet</p>
+        <p>Add <code>classification.py</code> to <code>FilesToRun.txt</code> and push to generate results</p>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <span>Citation Network Analysis &mdash; Data Science Project</span>
+  <span>Powered by GitHub Actions + AWS S3</span>
+</footer>
+
+<script>
+  const S3_BASE = "https://data-science-citation-network.s3.us-east-2.amazonaws.com";
+
+  const sections = [
+    { id: "eda-figures",     prefix: "outputs/figures/eda/",            tag: "eda" },
+    { id: "network-figures", prefix: "outputs/figures/network/",        tag: "network" },
+    { id: "cluster-figures", prefix: "outputs/figures/clustering/",     tag: "cluster" },
+    { id: "class-figures",   prefix: "outputs/figures/classification/", tag: "class" },
+  ];
+
+  async function loadFigures() {
+    for (const section of sections) {
+      const container = document.getElementById(section.id);
+      try {
+        const res = await fetch(`${S3_BASE}/?prefix=${section.prefix}&list-type=2`);
+        const text = await res.text();
+        const parser = new DOMParser();
+        const xml = parser.parseFromString(text, "application/xml");
+        const keys = [...xml.querySelectorAll("Key")]
+          .map(k => k.textContent)
+          .filter(k => k.match(/\.(png|jpg|jpeg|svg)$/i));
+
+        if (keys.length === 0) continue;
+
+        container.innerHTML = keys.map(key => {
+          const filename = key.split("/").pop();
+          const label = filename.replace(/\.(png|jpg|jpeg|svg)$/i, "").replace(/_/g, " ");
+          return `
+            <div class="figure-card">
+              <img class="figure-img" src="${S3_BASE}/${key}" alt="${label}" loading="lazy"/>
+              <div class="figure-label">${label}</div>
+            </div>`;
+        }).join("");
+      } catch (e) {
+        console.log(`Could not load figures for ${section.prefix}`);
+      }
+    }
+  }
+
+  function setStatus() {
+    const dot = document.getElementById("status-dot");
+    const text = document.getElementById("status-text");
+    const lastRun = document.getElementById("last-run");
+    const modified = document.lastModified;
+    lastRun.textContent = new Date(modified).toLocaleString();
+    dot.className = "status-dot";
+    text.textContent = "Pipeline ran successfully — results loaded from S3";
+  }
+
+  function setupNav() {
+    const links = document.querySelectorAll("nav a");
+    const sections = document.querySelectorAll(".section");
+    const observer = new IntersectionObserver(entries => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          links.forEach(l => l.classList.remove("active"));
+          const active = document.querySelector(`nav a[href="#${entry.target.id}"]`);
+          if (active) active.classList.add("active");
+        }
+      });
+    }, { threshold: 0.3 });
+    sections.forEach(s => observer.observe(s));
+  }
+
+  loadFigures();
+  setStatus();
+  setupNav();
+</script>
+</body>
+</html>
