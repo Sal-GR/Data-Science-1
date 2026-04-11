@@ -35,9 +35,9 @@ jobs:
         run: |
           git config user.name "github-actions"
           git config user.email "actions@github.com"
-          git add outputs/
+          git add outputs/ || true
           git commit -m "Update pipeline outputs [skip ci]" || echo "No changes"
-          git push
+          git push || echo "No changes to push"
 
       - name: Deploy GitHub Pages
         uses: peaceiris/actions-gh-pages@v3
