@@ -206,7 +206,7 @@
 
   async function loadSummary() {
     try {
-      const res = await fetch(`${S3}/outputs/data/summary.json`);
+      const res = await fetch(`${S3}/outputs/summary.json`);
       const d = await res.json();
       document.getElementById("stats-grid").innerHTML = [
         { label: "Total papers",      value: d.total_papers.toLocaleString() },
@@ -226,7 +226,7 @@
 
   async function loadSample() {
     try {
-      const res = await fetch(`${S3}/outputs/data/sample.json`);
+      const res = await fetch(`${S3}/outputs/sample.json`);
       allRows = await res.json();
       renderTable(allRows);
       document.getElementById("sample-label").textContent = `Sample records (${allRows.length} rows)`;
