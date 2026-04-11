@@ -1,1 +1,1 @@
-preprocess.py | outputs/data/
+preprocess.py | outputs/
