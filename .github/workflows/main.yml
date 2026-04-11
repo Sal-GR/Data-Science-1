@@ -28,16 +28,16 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-2
 
-      - name: Run preprocessing
-        run: python src/preprocess.py
+      - name: Run scripts from FilesToRun.txt
+        run: python src/runner.py
 
       - name: Commit outputs
         run: |
           git config user.name "github-actions"
           git config user.email "actions@github.com"
           git add outputs/ || true
-          git commit -m "Update pipeline outputs [skip ci]" || echo "No changes"
-          git push || echo "No changes to push"
+          git commit -m "Update pipeline outputs [skip ci]" || echo "No changes to commit"
+          git push || echo "Nothing to push"
 
       - name: Deploy GitHub Pages
         uses: peaceiris/actions-gh-pages@v3
