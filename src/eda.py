@@ -7,7 +7,7 @@ import boto3
 import os
 
 sns.set_theme(style="whitegrid", palette="muted", font_scale=1.1)
-ACCENT = "#2563EB"       # blue accent for highlights
+ACCENT = "#2563EB"  
 PALETTE = "Blues_d"
 
 print("Downloading cleaned dataset from S3...")
@@ -23,7 +23,7 @@ print(f"Loaded {len(df):,} papers.")
 
 os.makedirs("outputs/figures/eda", exist_ok=True)
 
-# Missing value heatmap summary bar chart
+# A1:  Missing value heatmap summary bar chart
 print("Plotting missing data summary...")
 
 missing_counts = {
@@ -60,7 +60,7 @@ plt.close()
 
 print("Plotting citation count distribution...")
 
-# B1:  Full distribution (log scaled x-axis) reveals right skew clearly
+# B1:  Full distribution (log scaled x-axis), reveals right skew clearly
 fig, ax = plt.subplots(figsize=(10, 5))
 nonzero = df[df["n_citation"] > 0]["n_citation"]
 ax.hist(nonzero, bins=100, color=ACCENT, edgecolor="white", linewidth=0.4)
@@ -82,7 +82,7 @@ plt.tight_layout()
 plt.savefig("outputs/figures/eda/citation_distribution_log.png", dpi=150, bbox_inches="tight")
 plt.close()
 
-# B2:  Zoomed-in view: papers with 0 to 50 citations (most papers live here)
+# B2:  Zoomed-in view: papers with 0–50 citations (most papers live here)
 fig, ax = plt.subplots(figsize=(10, 5))
 low_cite = df[df["n_citation"] <= 50]["n_citation"]
 ax.hist(low_cite, bins=51, color=ACCENT, edgecolor="white", linewidth=0.4)
@@ -102,8 +102,8 @@ df["era"] = pd.cut(df["year"],
 era_data = df[df["n_citation"] > 0]
 
 fig, ax = plt.subplots(figsize=(9, 5))
-sns.boxplot(data=era_data, x="era", y="n_citation", palette="Blues",
-            showfliers=False, ax=ax)
+sns.boxplot(data=era_data, x="era", y="n_citation", hue="era", palette="Blues",
+            showfliers=False, legend=False, ax=ax)
 ax.set_yscale("log")
 ax.set_xlabel("Publication era")
 ax.set_ylabel("Citation count (log scale)")
@@ -112,9 +112,11 @@ plt.tight_layout()
 plt.savefig("outputs/figures/eda/citation_boxplot_by_era.png", dpi=150, bbox_inches="tight")
 plt.close()
 
-# BB4:  CDF of citation counts
+# B4:  CDF of citation counts, sample 100k points to avoid OOM on runner
 fig, ax = plt.subplots(figsize=(10, 5))
-sorted_citations = np.sort(df["n_citation"].values)
+sample_size = min(100_000, len(df))
+cdf_sample = df["n_citation"].sample(sample_size, random_state=42)
+sorted_citations = np.sort(cdf_sample.values)
 cdf = np.arange(1, len(sorted_citations) + 1) / len(sorted_citations)
 ax.plot(sorted_citations, cdf, color=ACCENT, linewidth=1.5)
 ax.set_xscale("log")
@@ -184,7 +186,7 @@ top_venues = venue_df["venue"].value_counts().head(20).reset_index()
 top_venues.columns = ["venue", "count"]
 
 fig, ax = plt.subplots(figsize=(11, 8))
-sns.barplot(data=top_venues, y="venue", x="count", palette=PALETTE, ax=ax)
+sns.barplot(data=top_venues, y="venue", x="count", hue="venue", palette=PALETTE, legend=False, ax=ax)
 ax.set_xlabel("Number of papers")
 ax.set_ylabel("")
 ax.set_title("Top 20 Venues by Paper Count")
@@ -201,7 +203,7 @@ venue_cite = venue_cite[venue_cite["count"] >= 50]   # at least 50 papers for st
 top_cite_venues = venue_cite.nlargest(20, "median")
 
 fig, ax = plt.subplots(figsize=(11, 8))
-sns.barplot(data=top_cite_venues, y="venue", x="median", palette=PALETTE, ax=ax)
+sns.barplot(data=top_cite_venues, y="venue", x="median", hue="venue", palette=PALETTE, legend=False, ax=ax)
 ax.set_xlabel("Median citation count")
 ax.set_ylabel("")
 ax.set_title("Top 20 Venues by Median Citation Count\n(venues with ≥ 50 papers)")
@@ -266,14 +268,16 @@ plt.close()
 
 # E3:  Do papers with more authors get more citations?
 print("Plotting author count vs citations...")
-bucket = df.copy()
-bucket["author_bucket"] = pd.cut(bucket["author_count"],
-                                  bins=[0, 1, 2, 3, 5, 10, 9999],
-                                  labels=["1", "2", "3", "4–5", "6–10", "11+"])
-cite_by_auth = bucket.groupby("author_bucket", observed=True)["n_citation"].median().reset_index()
+author_bucket_col = pd.cut(df["author_count"],
+                           bins=[0, 1, 2, 3, 5, 10, 9999],
+                           labels=["1", "2", "3", "4–5", "6–10", "11+"])
+cite_by_auth = (df.assign(author_bucket=author_bucket_col)
+                  .groupby("author_bucket", observed=True)["n_citation"]
+                  .median()
+                  .reset_index())
 
 fig, ax = plt.subplots(figsize=(9, 5))
-sns.barplot(data=cite_by_auth, x="author_bucket", y="n_citation", palette=PALETTE, ax=ax)
+sns.barplot(data=cite_by_auth, x="author_bucket", y="n_citation", hue="author_bucket", palette=PALETTE, legend=False, ax=ax)
 ax.set_xlabel("Number of authors")
 ax.set_ylabel("Median citation count")
 ax.set_title("Median Citations by Author Count\n(do larger teams produce more-cited work?)")
