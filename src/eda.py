@@ -5,9 +5,10 @@ import seaborn as sns
 import numpy as np
 import boto3
 import os
+import gc
 
 sns.set_theme(style="whitegrid", palette="muted", font_scale=1.1)
-ACCENT = "#2563EB"  
+ACCENT = "#2563EB" 
 PALETTE = "Blues_d"
 
 print("Downloading cleaned dataset from S3...")
@@ -18,7 +19,9 @@ s3.download_file(
     "cleaned/papers.parquet",
     "cleaned/papers.parquet"
 )
-df = pd.read_parquet("cleaned/papers.parquet")
+COLS = ["n_citation", "year", "venue", "author_count", "reference_count",
+        "abstract", "authors", "references"]
+df = pd.read_parquet("cleaned/papers.parquet", columns=COLS)
 print(f"Loaded {len(df):,} papers.")
 
 os.makedirs("outputs/figures/eda", exist_ok=True)
@@ -57,10 +60,11 @@ fig.suptitle("Data Completeness Overview", fontsize=14, fontweight="bold")
 plt.tight_layout()
 plt.savefig("outputs/figures/eda/missing_data_summary.png", dpi=150, bbox_inches="tight")
 plt.close()
+gc.collect()
 
 print("Plotting citation count distribution...")
 
-# B1:  Full distribution (log scaled x-axis), reveals right skew clearly
+# B1:  Full distribution (log-scaled x-axis) — reveals right skew clearly
 fig, ax = plt.subplots(figsize=(10, 5))
 nonzero = df[df["n_citation"] > 0]["n_citation"]
 ax.hist(nonzero, bins=100, color=ACCENT, edgecolor="white", linewidth=0.4)
@@ -112,7 +116,7 @@ plt.tight_layout()
 plt.savefig("outputs/figures/eda/citation_boxplot_by_era.png", dpi=150, bbox_inches="tight")
 plt.close()
 
-# B4:  CDF of citation counts, sample 100k points to avoid OOM on runner
+# B4:  CDF of citation counts — sample 100k points to avoid OOM on runner
 fig, ax = plt.subplots(figsize=(10, 5))
 sample_size = min(100_000, len(df))
 cdf_sample = df["n_citation"].sample(sample_size, random_state=42)
@@ -134,6 +138,8 @@ ax.text(threshold * 1.2, 0.3, f"{pct_below:.1f}% of papers\nhave < {threshold} c
 plt.tight_layout()
 plt.savefig("outputs/figures/eda/citation_cdf.png", dpi=150, bbox_inches="tight")
 plt.close()
+del nonzero, low_cite, era_data, sorted_citations, cdf
+gc.collect()
 
 print("Plotting papers per year...")
 
@@ -176,6 +182,8 @@ ax.set_title("Median Citation Count by Publication Year\n(older papers have had 
 plt.tight_layout()
 plt.savefig("outputs/figures/eda/median_citations_by_year.png", dpi=150, bbox_inches="tight")
 plt.close()
+del year_counts, cite_by_year
+gc.collect()
 
 print("Plotting venue analysis...")
 
@@ -199,7 +207,7 @@ plt.close()
 venue_cite = (venue_df.groupby("venue")["n_citation"]
               .agg(median="median", count="count")
               .reset_index())
-venue_cite = venue_cite[venue_cite["count"] >= 50]   # at least 50 papers for stability
+venue_cite = venue_cite[venue_cite["count"] >= 50]
 top_cite_venues = venue_cite.nlargest(20, "median")
 
 fig, ax = plt.subplots(figsize=(11, 8))
@@ -231,6 +239,8 @@ ax.legend(fontsize=8, loc="upper left")
 plt.tight_layout()
 plt.savefig("outputs/figures/eda/top5_venues_over_time.png", dpi=150, bbox_inches="tight")
 plt.close()
+del venue_df, top_venues, venue_cite, top_cite_venues, venue_year
+gc.collect()
 
 print("Plotting author count distribution...")
 
@@ -284,6 +294,8 @@ ax.set_title("Median Citations by Author Count\n(do larger teams produce more-ci
 plt.tight_layout()
 plt.savefig("outputs/figures/eda/citations_by_author_count.png", dpi=150, bbox_inches="tight")
 plt.close()
+del author_capped, collab, cite_by_auth, author_bucket_col
+gc.collect()
 
 print("Plotting reference count distribution...")
 
