@@ -1,0 +1,12 @@
+{
+  "total_papers": 3079007,
+  "year_min": 1936,
+  "year_max": 2018,
+  "unique_venues": 5079,
+  "missing_abstracts": 530475,
+  "missing_venue": 506699,
+  "avg_citations": 35.22,
+  "avg_authors": 3.08,
+  "avg_references": 8.17,
+  "total_citations": 108445406
+}
