@@ -10,7 +10,7 @@ from sklearn.decomposition import IncrementalPCA
 from sklearn.cluster import MiniBatchKMeans
 from sklearn.metrics import silhouette_score
 
-CHUNK_SIZE      = 100_000   # size is what works for low memory
+CHUNK_SIZE      = 80_000   # size is what works for low memory
 TFIDF_SAMPLE    = 500_000   # papers used to fit TF-IDF vocabulary
 N_COMPONENTS    = 50        # PCA dimensions for clustering
 N_COMPONENTS_2D = 2         # PCA dimensions for visualization
