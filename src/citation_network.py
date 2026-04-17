@@ -7,12 +7,12 @@ import os
 import gc
 
 import networkx as nx
+import pyarrow.parquet as pq
 
 LOCAL_PARQUET        = "cleaned/papers.parquet"
 LOCAL_CLUSTER        = "cleaned/paper_clusters.parquet"
-CHUNK_SIZE           = 100_000
 PAGERANK_ALPHA       = 0.85
-SUBGRAPH_TOP_N       = 300    
+SUBGRAPH_TOP_N       = 300
 CROSS_CLUSTER_SAMPLE = 200_000
 
 s3 = boto3.client("s3")
@@ -42,7 +42,7 @@ except Exception:
             "Ensure clustering.py runs before Network.py in FilesToRun.txt."
         )
 
-print("\nLoading paper metadata (no references) …")
+print("\nLoading paper metadata …")
 meta = pd.read_parquet(
     LOCAL_PARQUET,
     columns=["id", "title", "year", "n_citation"]
@@ -51,63 +51,112 @@ meta["year"]       = pd.to_numeric(meta["year"],       errors="coerce")
 meta["n_citation"] = pd.to_numeric(meta["n_citation"], errors="coerce").fillna(0).astype(int)
 
 clusters = pd.read_parquet(LOCAL_CLUSTER, columns=["id", "cluster"])
-meta     = meta.merge(clusters, on="id", how="left")
+
+#  DIAGNOSTIC: check join health before proceeding 
+print(f"\n  papers.parquet IDs  — count: {len(meta):,}  sample: {meta['id'].iloc[0]!r}")
+print(f"  paper_clusters IDs  — count: {len(clusters):,}  sample: {clusters['id'].iloc[0]!r}")
+overlap = len(set(meta["id"]) & set(clusters["id"]))
+print(f"  ID overlap: {overlap:,} ({overlap/len(meta)*100:.1f}% of papers have a cluster label)")
+
+meta = meta.merge(clusters, on="id", how="left")
 meta["cluster"] = meta["cluster"].fillna(-1).astype(np.int16)
+labelled_count  = (meta["cluster"] >= 0).sum()
+print(f"  After merge: {labelled_count:,} papers have a cluster label ({labelled_count/len(meta)*100:.1f}%)")
 del clusters
 gc.collect()
 
 valid_ids     = set(meta["id"])
 id_to_cluster = dict(zip(meta["id"], meta["cluster"]))
 total_papers  = len(meta)
-n_chunks      = int(np.ceil(total_papers / CHUNK_SIZE))
-print(f"  {total_papers:,} papers  |  {meta['cluster'].nunique()} cluster labels  |  {n_chunks} chunks")
+print(f"  Total papers: {total_papers:,}")
 
-# Build DiGraph in chunks, never hold full edge list in RAM 
-print("\nBuilding DiGraph in chunks …")
+#Build DiGraph using pyarrow row groups
+print("\nBuilding DiGraph via pyarrow row groups …")
 G           = nx.DiGraph()
 G.add_nodes_from(valid_ids)
 total_edges = 0
 
-# Read parquet once in chunks using pandas; for very large files a row group
-# aware reader would be faster but this is memory safe.
-full_refs = pd.read_parquet(LOCAL_PARQUET, columns=["id", "references"])
-full_refs = full_refs.dropna(subset=["id"]).reset_index(drop=True)
+pf          = pq.ParquetFile(LOCAL_PARQUET)
+n_groups    = pf.metadata.num_row_groups
+print(f"  Parquet has {n_groups} row groups")
 
-for i in range(n_chunks):
-    chunk = full_refs.iloc[i * CHUNK_SIZE : (i + 1) * CHUNK_SIZE].copy()
-    chunk["references"] = chunk["references"].apply(
-        lambda x: x if isinstance(x, list) else []
-    )
-    chunk_edges = [
-        (row["id"], cited)
-        for _, row in chunk.iterrows()
-        for cited in row["references"]
-        if cited in valid_ids
-    ]
-    G.add_edges_from(chunk_edges)
-    total_edges += len(chunk_edges)
-    del chunk, chunk_edges
+#  DIAGNOSTIC: inspect the references column in the first row group 
+rg0     = pf.read_row_group(0, columns=["id", "references"]).to_pandas()
+ref_col = rg0["references"]
+print(f"\n  references dtype   : {ref_col.dtype}")
+print(f"  references[0] type : {type(ref_col.iloc[0])}")
+print(f"  references[0] value: {ref_col.iloc[0]!r}")
+non_null = ref_col.dropna()
+non_empty = non_null[non_null.apply(lambda x: isinstance(x, (list, np.ndarray)) and len(x) > 0)]
+print(f"  Non-null refs in rg0: {len(non_null):,}  |  Non-empty lists: {len(non_empty):,}")
+if len(non_empty) > 0:
+    print(f"  First non-empty ref list: {non_empty.iloc[0]!r}")
+del rg0, ref_col, non_null, non_empty
+
+for g in range(n_groups):
+    rg = pf.read_row_group(g, columns=["id", "references"]).to_pandas()
+
+    def to_list(x):
+        if isinstance(x, (list, np.ndarray)):
+            return list(x)
+        if isinstance(x, str):
+            import ast
+            try:
+                return ast.literal_eval(x)
+            except Exception:
+                return []
+        return []
+
+    rg["references"] = rg["references"].apply(to_list)
+
+    rg = rg[rg["references"].map(len) > 0]
+    if len(rg) == 0:
+        del rg
+        continue
+
+    exploded = rg.explode("references").dropna(subset=["references"])
+    exploded = exploded.rename(columns={"id": "citing", "references": "cited"})
+
+    mask  = exploded["cited"].isin(valid_ids)
+    edges = list(zip(exploded.loc[mask, "citing"], exploded.loc[mask, "cited"]))
+
+    G.add_edges_from(edges)
+    total_edges += len(edges)
+    del rg, exploded, edges
     gc.collect()
-    if (i + 1) % 10 == 0 or i == n_chunks - 1:
-        print(f"  Chunk {i+1}/{n_chunks}  |  edges so far: {total_edges:,}")
 
-del full_refs
-gc.collect()
-print(f"\nGraph: {G.number_of_nodes():,} nodes  |  {G.number_of_edges():,} edges")
+    if (g + 1) % 5 == 0 or g == n_groups - 1:
+        print(f"  Row group {g+1}/{n_groups}  |  edges so far: {total_edges:,}")
 
-#PageRank 
-print("\nComputing PageRank (scipy sparse solver) …")
+print(f"\nGraph built: {G.number_of_nodes():,} nodes  |  {G.number_of_edges():,} edges")
+
+#DIAGNOSTIC: abort early with clear message if graph is still empty 
+if G.number_of_edges() == 0:
+    raise RuntimeError(
+        "Graph has 0 edges after processing all row groups.\n"
+        "This means the 'references' column could not be parsed into valid IDs.\n"
+        "Check the diagnostic output above — look at 'references[0] value' and "
+        "'references dtype' to see what the column actually contains."
+    )
+
+# PageRank
+print("\nComputing PageRank …")
 try:
     pagerank = nx.pagerank_scipy(G, alpha=PAGERANK_ALPHA, max_iter=200, tol=1e-6)
     print("  Used pagerank_scipy")
 except AttributeError:
     pagerank = nx.pagerank(G, alpha=PAGERANK_ALPHA, max_iter=200, tol=1e-6)
-    print("  Used nx.pagerank (scipy backend)")
+    print("  Used nx.pagerank")
 
 in_degree = dict(G.in_degree())
 
-# Extract subgraph BEFORE freeing G
-print(f"Extracting top-{SUBGRAPH_TOP_N} subgraph before freeing graph …")
+# Check if PageRank is still uniform the solver failed
+pr_values = list(pagerank.values())
+print(f"  PageRank — min: {min(pr_values):.3e}  max: {max(pr_values):.3e}  "
+      f"ratio: {max(pr_values)/max(min(pr_values), 1e-20):.1f}x")
+
+# Extract subgraph before freeing G
+print(f"Extracting top-{SUBGRAPH_TOP_N} subgraph …")
 meta["pagerank"]  = meta["id"].map(pagerank)
 meta["in_degree"] = meta["id"].map(in_degree).fillna(0).astype(int)
 top_ids = set(meta.nlargest(SUBGRAPH_TOP_N, "pagerank")["id"])
@@ -115,14 +164,14 @@ SG      = G.subgraph(top_ids).copy()
 
 del G
 gc.collect()
-print("  Full graph freed from RAM")
+print("  Full graph freed")
 
-#Save enriched metrics 
+# Save
 out_cols = ["id", "title", "year", "n_citation", "cluster", "pagerank", "in_degree"]
 meta[out_cols].to_parquet("outputs/data/network_metrics.parquet", index=False)
 print("Saved outputs/data/network_metrics.parquet")
 
-# Shared colour map 
+# Color map
 unique_clusters = sorted(c for c in meta["cluster"].unique() if c >= 0)
 n_clusters      = len(unique_clusters)
 cmap            = cm.get_cmap("tab20", max(n_clusters, 1))
@@ -155,7 +204,7 @@ plt.savefig("outputs/figures/network/top20_pagerank.png", dpi=150, bbox_inches="
 plt.close()
 print("Saved top20_pagerank.png")
 
-#Figure 2: PageRank vs citation count 
+# Figure 2: PageRank vs citation count 
 scatter = meta.dropna(subset=["pagerank"])
 scatter = scatter[scatter["n_citation"] > 0].sample(min(80_000, len(scatter)), random_state=42)
 
@@ -179,53 +228,48 @@ del scatter
 gc.collect()
 print("Saved pagerank_vs_citations.png")
 
-# Figure 3: Cross-cluster heatmap, second chunked pass
-print(f"\nBuilding cross-cluster heatmap (sampling up to {CROSS_CLUSTER_SAMPLE:,} edges) …")
+#Figure 3: Cross-cluster heatmap 
+print(f"\nBuilding cross-cluster heatmap …")
 k        = n_clusters
 c_to_row = {c: i for i, c in enumerate(unique_clusters)}
 cross    = np.zeros((k, k), dtype=np.int64)
 sampled  = 0
 
-refs_scan = pd.read_parquet(LOCAL_PARQUET, columns=["id", "references"])
-refs_scan = refs_scan.dropna(subset=["id"]).reset_index(drop=True)
-
-for i in range(n_chunks):
+pf2 = pq.ParquetFile(LOCAL_PARQUET)
+for g in range(n_groups):
     if sampled >= CROSS_CLUSTER_SAMPLE:
         break
-    chunk = refs_scan.iloc[i * CHUNK_SIZE : (i + 1) * CHUNK_SIZE].copy()
-    chunk["references"] = chunk["references"].apply(
-        lambda x: x if isinstance(x, list) else []
+    rg = pf2.read_row_group(g, columns=["id", "references"]).to_pandas()
+    rg["references"] = rg["references"].apply(
+        lambda x: list(x) if isinstance(x, (list, np.ndarray)) else []
     )
-    for _, row in chunk.iterrows():
+    rg = rg[rg["references"].map(len) > 0]
+    if len(rg) == 0:
+        del rg; continue
+
+    exploded = rg.explode("references").dropna(subset=["references"])
+    for _, row in exploded.iterrows():
         if sampled >= CROSS_CLUSTER_SAMPLE:
             break
         cc = id_to_cluster.get(row["id"], -1)
-        if cc < 0 or cc not in c_to_row:
-            continue
-        for cited in row["references"]:
-            if sampled >= CROSS_CLUSTER_SAMPLE:
-                break
-            cd = id_to_cluster.get(cited, -1)
-            if cd >= 0 and cd in c_to_row:
-                cross[c_to_row[cc], c_to_row[cd]] += 1
-                sampled += 1
-    del chunk
+        cd = id_to_cluster.get(row["references"], -1)
+        if cc >= 0 and cd >= 0 and cc in c_to_row and cd in c_to_row:
+            cross[c_to_row[cc], c_to_row[cd]] += 1
+            sampled += 1
+    del rg, exploded
     gc.collect()
 
-del refs_scan
-gc.collect()
-print(f"  Sampled {sampled:,} edges for heatmap")
-
-row_sums            = cross.sum(axis=1, keepdims=True)
+print(f"  Sampled {sampled:,} edges")
+row_sums = cross.sum(axis=1, keepdims=True)
 row_sums[row_sums == 0] = 1
-cross_norm          = cross / row_sums
+cross_norm = cross / row_sums
 
 fig, ax = plt.subplots(figsize=(10, 8))
 im = ax.imshow(cross_norm, cmap="YlOrRd", aspect="auto")
 plt.colorbar(im, ax=ax, label="Proportion of outgoing citations")
 ax.set_xticks(range(k)); ax.set_xticklabels([f"C{c}" for c in unique_clusters], fontsize=8)
 ax.set_yticks(range(k)); ax.set_yticklabels([f"C{c}" for c in unique_clusters], fontsize=8)
-ax.set_xlabel("Cited cluster",  fontsize=11)
+ax.set_xlabel("Cited cluster", fontsize=11)
 ax.set_ylabel("Citing cluster", fontsize=11)
 ax.set_title("Cross-Cluster Citation Heatmap\n(row = citing, col = cited; normalised by row)",
              fontsize=13, fontweight="bold")
@@ -239,7 +283,7 @@ print("Saved cross_cluster_heatmap.png")
 for i, c in enumerate(unique_clusters):
     print(f"  Cluster {c:2d} self-citation: {cross_norm[i, i]:.2%}")
 
-#Figure 4: PageRank per cluster box plot 
+# Figure 4: PageRank per cluster box plot 
 labelled      = meta[(meta["cluster"] >= 0) & meta["pagerank"].notna()]
 cluster_order = (labelled.groupby("cluster")["pagerank"]
                  .median().sort_values(ascending=False).index.tolist())
@@ -261,7 +305,7 @@ plt.savefig("outputs/figures/network/pagerank_per_cluster_boxplot.png", dpi=150,
 plt.close()
 print("Saved pagerank_per_cluster_boxplot.png")
 
-#Figure 5: Citation volume by cluster over time 
+# Figure 5: Citation volume by cluster over time 
 meta["decade"] = (meta["year"] // 10 * 10).astype("Int64")
 timeline = (meta[(meta["cluster"] >= 0) & meta["decade"].notna()]
             .groupby(["decade", "cluster"])["in_degree"]
@@ -291,7 +335,7 @@ node_sizes  = [max(20, pr_sub[n] * 5e5) for n in SG.nodes()]
 pos = nx.spring_layout(SG, seed=42, k=0.4)
 
 fig, ax = plt.subplots(figsize=(14, 10))
-nx.draw_networkx_edges(SG, pos, ax=ax, alpha=0.12, edge_color="gray",
+nx.draw_networkx_edges(SG, pos, ax=ax, alpha=0.15, edge_color="gray",
                        arrows=True, arrowsize=6, width=0.5)
 nx.draw_networkx_nodes(SG, pos, ax=ax,
                        node_color=node_colors, node_size=node_sizes, alpha=0.85)
@@ -310,6 +354,8 @@ plt.close()
 del SG
 gc.collect()
 print("Saved subgraph_top_papers.png")
+
+# Summary 
 print("\n" + "=" * 60)
 print("NETWORK SUMMARY")
 print("=" * 60)
