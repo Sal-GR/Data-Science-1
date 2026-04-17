@@ -7,3 +7,4 @@ matplotlib
 networkx
 lightgbm
 scipy
+networkx
