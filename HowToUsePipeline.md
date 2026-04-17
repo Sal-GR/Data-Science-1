@@ -1,6 +1,5 @@
-# Contributing to Citation Network Analysis
-
-This document explains how to add your analysis to the pipeline. Read it fully before writing any code.
+# Pipline for Computational work
+If your computer can't handle the coputational workload(like mines), you can use this pipeline to pass the workload to github.
 
 ---
 
@@ -11,7 +10,6 @@ When you push code to `main`, GitHub Actions automatically:
 2. Runs each script in order
 3. Uploads results to AWS S3
 4. Commits figures back to this repo
-5. Updates the results UI at https://sal-gr.github.io/Data-Science-1
 
 You never need to touch AWS, the workflow file, or the UI. Just write your script, register it, and push.
 
@@ -19,7 +17,7 @@ You never need to touch AWS, the workflow file, or the UI. Just write your scrip
 
 ### Step 1: Write your script in `src/`
 
-Create a new `.py` file in the `src/` folder. Name it after your task:
+Create a python file in the "src" folder. Name it after your task:
 
 | Task | Filename |
 |---|---|
@@ -111,14 +109,14 @@ Once the pipeline finishes (~10 minutes), check:
 
 ### Files and folders
 - Write all scripts in `src/`
-- Save all figures to `outputs/figures/your-task/` the UI only reads from these folders
-- Save figures as `.png`, the UI displays png, jpg, and svg only
+- Save all figures to `outputs/figures/your_task/`
+- Save figures as `.png`
 - Never save files outside the `outputs/` folder
 
 ### Plotting
 - **Never use `plt.show()`**, it will cause the pipeline to hang indefinitely
 - Always use `plt.savefig()` followed by `plt.close()`
-- Use `dpi=150` and `bbox_inches="tight"` for clean figures
+- Use `dpi=150` and `bbox_inches="tight"` for figures
 
 ### Data access
 - Always read the cleaned dataset from S3 using the template above
