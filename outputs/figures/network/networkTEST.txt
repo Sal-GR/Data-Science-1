@@ -1,1 +1,132 @@
-where network figures would go
+Summary
+
+The goal of the citation network analysis was to build a directed graph of
+3 million academic papers and use it to identify the most influential works
+using PageRank and in-degree centrality. Cluster labels produced by the
+clustering pipeline were joined onto every paper so that influence could be
+interpreted through the lens of research area.
+
+
+GRAPH CONSTRUCTION
+Each paper in the dataset is a node. Each entry in a paper's "references"
+list becomes a directed edge pointing from the citing paper to the cited paper,
+so that authority flows toward frequently-cited works, the standard direction
+for academic influence measurement.
+
+The references column was read from the cleaned parquet file using pyarrow's
+row-group API, which reads one storage chunk at a time (50–100k rows) rather
+than loading the entire file into RAM. Within each row group, pandas' explode()
+was used to unroll each paper's reference list into individual rows, and a
+single isin() filter kept only edges where both endpoints existed in the
+dataset. Edges were added to the NetworkX DiGraph incrementally and the chunk
+was discarded immediately after, so the peak memory cost of edge building was
+one row group at a time rather than the full 100 million edge list.
+
+Only edges where both the citing and cited paper IDs existed in the cleaned
+dataset were included. References pointing outside the dataset were dropped.
+
+
+METRICS USED
+PageRank (alpha = 0.85, tolerance = 1e-6, max 200 iterations):
+    The primary influence metric. PageRank weighs not just how many papers cite
+    a work, but how influential those citing papers are themselves. This is
+    preferable to raw citation count because a paper in an active field will
+    naturally accumulate more citations than an equally important paper in a
+    smaller field. The scipy sparse matrix solver was used (pagerank_scipy)
+    to keep memory usage in the 1–2 GB range instead of the 5+ GB required
+    by the pure-Python power iteration.
+
+N degree:
+    The raw count of how many papers in the dataset cite a given paper.
+    Simpler than PageRank but useful as a cross-check and for the citation
+    volume over time figure.
+
+
+USING CLUSTER TO ENRICH CITATION NETWORK
+Cluster labels (C0–C19) produced by the clustering pipeline (MiniBatchKMeans
+on TF-IDF + SVD embeddings of paper titles and abstracts) were joined onto
+the paper metadata before any graph work began.
+
+4 cluster aware analyses:
+
+1. Cross cluster citation heatmap: for a sample of 200,000 edges, each edge
+   was mapped to (cluster of citing paper, cluster of cited paper) and tallied
+   into a k×k matrix. Each row was normalised by its sum to show the proportion
+   of outgoing citations going to each cluster. The diagonal of this matrix
+   shows the self citation rate, how siloed each research area is.
+
+2. PageRank per cluster box plot: the distribution of PageRank scores within
+   each cluster was visualised as a box plot sorted by median, showing which
+   research areas tend to produce the most influential papers relative to their
+   size.
+
+3. Citation volume over time: n degree was summed by cluster and decade
+   (1980–2020) to show which research areas grew in citation volume over time
+   and which drove trends in particular eras.
+
+4. Subgraph visualisation: the top 300 papers by PageRank were extracted into
+   a subgraph and drawn using a spring layout, with node size proportional to
+   PageRank score and node color representing cluster. This gives an at a glance
+   view of whether influence is concentrated in one research area or spread
+   across disciplines.
+
+
+FIGURES
+  top20_pagerank.png
+      Horizontal bar chart of the 20 highest-PageRank papers, annotated
+      with publication year, raw citation count, and cluster label.
+
+  pagerank_vs_citations.png
+      Scatter plot of log(1 + n_citation) vs PageRank for an 80,000 paper
+      sample, colored by cluster. Reveals papers that are highly influential
+      by PageRank despite modest raw citation counts, and vice versa.
+
+  cross_cluster_heatmap.png
+      Row normalised k×k heatmap showing citation flow between clusters.
+      The diagonal (highlighted in blue) represents within cluster
+      self citation rates.
+
+  pagerank_per_cluster_boxplot.png
+      Box plot of PageRank distribution per cluster, sorted by median
+      (outliers hidden). Answers: which research areas produce the most
+      influential work?
+
+  cluster_citation_volume_over_time.png
+      Line chart of total in network citations received per cluster per
+      decade from 1980 to 2020. Answers: which research areas drove
+      citation trends over time?
+
+  subgraph_top_papers.png
+      Spring layout graph of the top 300 papers by PageRank. Node size
+      scales with PageRank score; color represents cluster membership.
+
+
+MEMORY ISSUE
+The dataset contains 3 million papers and 100 million citation edges, and
+the GitHub Actions runner is limited to 8 GB of RAM. Several steps were taken
+to stay within this budget:
+
+- The references column was never loaded into the main metadata DataFrame.
+  It was only accessed during the two chunked passes (graph building and
+  heatmap sampling) and deleted after each row group.
+
+- Edges were added to the graph directly per row group rather than collected
+  into a Python list first. A full edge list of 100M tuples would be 5 GB
+  on its own.
+
+- The full NetworkX DiGraph was deleted immediately after the top-300 subgraph
+  was extracted, before any figures were rendered. This prevented the graph
+  (3–4 GB) and matplotlib figures from coexisting in RAM.
+
+- The scipy sparse PageRank solver was used instead of the default pure-Python
+  power iteration, reducing solver peak RAM from 5 GB to 1–2 GB.
+
+- network_metrics.parquet was uploaded directly to S3 and excluded
+  from the git commit, since GitHub enforces a 100 MB file size limit. All
+  figure PNGs were committed to the repo normally.
+
+
+OUTPUT FILES
+outputs/figures/network/ : all 6 PNG figures (committed to GitHub)
+outputs/data/network_metrics.parquet: per-paper metrics including
+    PageRank, in-degree, cluster, year, and citation count (S3 only)
