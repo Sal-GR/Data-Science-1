@@ -1,1 +1,50 @@
-where clustering images will go
+MAIN PROBLEM:
+The core issue is that loading the full 3 million paper dataset from a 3.8 GB Parquet file expands to roughly 15–20 GB in RAM once Python inflates the compressed text strings into objects. On top of that, the naive approach to dimensionality reduction (PCA) requires converting sparse TF-IDF matrices to dense format, which for a 100,000 paper chunk with 20,000 features produces a single matrix of approximately 8 GB, and briefly double that during the float64 to float32 conversion. the total peak memory requirement reached 28 GB, beyond what the GitHub Actions runner can provide. The solution was to never load the full dataset at once, stream data in 100,000 paper chunks, and replace PCA with TruncatedSVD which operates natively on sparse matrices and eliminates the dense conversion entirely, bringing peak memory per chunk down to approximately 2–3 GB.
+
+Text Representation: TF-IDF
+Each paper's text_combined field (title + abstract) was vectorized using TfidfVectorizer with a vocabulary of 15,000 terms. sublinear_tf=True was applied
+to dampen the dominance of high frequency terms, and standard English stop words were removed. Because fitting TF-IDF on 3 million papers at once would exceed
+available memory, the vocabulary was fit on a representative 500,000 paper random sample. Since min_df=5 filters out rare terms regardless, the vocabulary learned
+from the sample is effectively the same as what a full fit would produce.
+
+Dimensionality Reduction: TruncatedSVD
+Rather than PCA, TruncatedSVD was used to reduce the TF-IDF vectors to 100
+dimensions. The key reason for this choice was memory: PCA requires converting
+sparse matrices to dense (.toarray()), which would have produced an 8 GB spike
+per 100k-paper chunk. TruncatedSVD operates natively on sparse matrices, keeping
+peak memory per chunk at roughly 150–200 MB. SVD was fit on a 500,000-paper
+sparse sample, which is safe to hold in memory. A Normalizer was applied after
+SVD to improve cluster cohesion.
+
+Clustering: MiniBatchKMeans
+MiniBatchKMeans was chosen over standard KMeans because it supports partial_fit(),
+allowing the model to be trained one chunk at a time without ever loading the full
+dataset. The optimal number of clusters k was selected by evaluating inertia
+(elbow method) and silhouette score across k in {5, 8, 10, 12, 15, 20} on a
+100,000-paper sample.
+
+
+THREE PASSES
+The full 3M paper dataset was never loaded into memory at once. Instead the
+pipeline made three streaming passes through the data in 100,000-paper chunks:
+
+  Pass 1: TruncatedSVD fit (sparse throughout)
+  Pass 2: SVD transform with MiniBatchKMeans.partial_fit()
+  Pass 3: TF-IDF transform --> SVD transform-->label assignment + 2D coords collected
+
+Peak RAM per chunk was approximately 2–3 GB, compared to an estimated 28 GB if the naive dense approach had been used.
+
+
+OUTPUTS
+  elbow_silhouette.png: justifies the chosen value of k
+  cluster_scatter.png: 2D SVD projection of 50,000 sampled papers colored by cluster
+  cluster_sizes.png: number of papers per cluster
+  cluster_median_citations.png: median citation count per cluster, showing which research areas attract more influence
+  cluster_growth_over_time.png: papers per cluster per decade from 1980–2020,revealing which areas grew or declined
+  paper_clusters.parquet: paper ID → cluster label mapping passed to the Citation Network script for node coloring and cross-cluster analysis
+
+
+TRADEOFFS
+All approximations were deliberate engineering decisions made necessary by the
+scale of the dataset. Fitting TF-IDF and SVD on samples rather than the full
+corpus introduces minor approximation, but results show not be that affected
